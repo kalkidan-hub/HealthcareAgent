@@ -1,6 +1,11 @@
 # Healthcare Agent
 
+## Problem Statement
+
+Hospitals struggle to provide timely, personalized care to patients due to overburdened staff and inefficient follow-up systems. This leads to missed appointments, delayed interventions, and poor patient outcomes. An AI-powered remote care agent is needed to automate patient engagement, analyze health data, and proactively coordinate care—reducing costs, improving outcomes, and enhancing patient satisfaction.
+
 This is a healthcare agent application built with FastAPI. The application provides various endpoints for managing lab reports, prescriptions, conversations, and sending emails. It also integrates with Twilio SendGrid for sending emails.
+
 
 ## Features
 
