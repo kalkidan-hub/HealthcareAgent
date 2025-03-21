@@ -1,8 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from backend.models.lab_report import LabReport
+from backend.models.patient import LabReport
 from backend.infrastructure.local_storage import save_to_local_storage
-from backend.services.analyzer import analyze_report
-from backend.services.risk_factor_extractor import extract_risk_factors
 
 router = APIRouter()
 
@@ -12,16 +10,8 @@ def add_lab_report(lab_report: LabReport):
     filename = f"lab_reports/{lab_report.patient_id}_{lab_report.report_date}.json"
     save_to_local_storage(filename, lab_report.model_dump_json())
 
-    # Analyze the lab report
-    analysis_result = analyze_report(lab_report.dict(), lab_report.patient_id)
-
-    # Extract risk factors from the analysis result
-    extract_risk_factors(analysis_result["explanations"], lab_report.patient_id)
-    
-    # Update patient's risk factors (placeholder implementation)
-    # update_patient_risk_factors(lab_report.patient_id, risk_factors)
-
-    return {
-        "message": "Lab report added and analyzed",
-        "analysis_result": analysis_result,
-    }
+@router.get("get_lab_report")
+def get_lab_report(patient_id: str, report_date: str):
+    filename = f"lab_reports/{patient_id}_{report_date}.json"
+    lab_report = LabReport.from_json(filename)
+    return lab_report
