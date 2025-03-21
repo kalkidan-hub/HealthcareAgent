@@ -6,38 +6,32 @@ Hospitals struggle to provide timely, personalized care to patients due to overb
 
 This is a healthcare agent application built with FastAPI. The application provides various endpoints for managing lab reports, prescriptions, conversations, and sending emails. It also integrates with Twilio SendGrid for sending emails.
 
-
 ## Features
 
-### 1. Update Patients' Calendar Based on Prescriptions
+1. **Agentic Dynamic Patient Check-Up via Email**:
+   - Automatically schedules and sends emails to patients based on their health status and risk factors.
 
-When a new prescription is added for a patient, the application updates the patient's calendar with the prescription details. This helps patients keep track of their medication schedules and ensures they follow their prescribed treatments.
+2. **Risk Factor Extraction and Remediation**:
+   - Extracts risk factors from patient's records and sends emails to patients with information and remediation steps.
 
-### 2. Deduce Risk Factors
+3. **Electronic Health Records (EHR) for Doctors**:
+   - Provides doctors with comprehensive EHRs of patients, including risk factors and prescriptions.
 
-The application deduces risk factors for patients based on their lab reports, recent activities, and conversations with the agent. This helps in identifying potential health risks and taking preventive measures.
+## Upcoming Features
 
-### 3. Compose and Send Personalized Emails
+1. **Chatbot for Patients**:
+   - A chatbot that allows patients to interact with the healthcare assistant about their health status and other health-related queries.
 
-The application composes and sends personalized emails to users based on their risk factors. The emails include awareness about the identified risks and suggestions for mitigating them. This feature uses Twilio SendGrid for sending emails.
+2. **Appointment Scheduling with Doctors**:
+   - Enables patients to schedule appointments with doctors directly through the platform.
 
-### 4. Provide Explanations and Action Suggestions for Nurses
+3. **Demographical Health Status Reporting**:
+   - Analyzes and reports on the health status of different demographics based on patients' EHRs.
 
-The application provides detailed explanations and suggested actions for nurses based on lab reports. This helps nurses understand the lab results better and take appropriate actions for patient care.
-
-### 5. Talk to Patients About Their Health Status
-
-The application engages in conversations with patients about their health status and general health knowledge. This helps in educating patients and keeping them informed about their health conditions.
 
 ## Requirements
 
-- Python 3.8+
-- FastAPI
-- Uvicorn
-- Streamlit
-- Python-dotenv
-- Twilio
-- SendGrid
+
 
 ## Installation
 
@@ -54,15 +48,16 @@ source venv/bin/activate  # On Windows use `venv\Scripts\activate`
 ```
 4. Install Dependenies
 ```sh
-pip install -r [requirements.txt](http://_vscodecontentref_/0)
+pip install -r requirements.txt
 ```
 5. Set up .env
    Create a .env file in the root directory and add the following environment variables:
 ```sh
 # .env
-SENDGRID_API_KEY=your_sendgrid_api_key_here
-GEMINI_LLM_API_URL=https://api.gemini-llm.com/analyze
-GEMINI_LLM_API_KEY=your_gemini_llm_api_key_here
+GOOGLE_APPLICATION_CREDENTIALS=...
+GOOGLE_PROJECT_ID=...
+SENDER_EMAIL = ...
+SENDER_PASSWORD = ...
 ```
 ## Run the Application
 To run the FastAPI application, use the following command:
