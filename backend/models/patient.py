@@ -1,5 +1,5 @@
 from datetime import date
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import List, Optional
 
 from schedule import Job
@@ -37,7 +37,7 @@ class LabReport(BaseModel):
     normal_range: str
     status: str
 
-class CinicalNotes(BaseModel):
+class ClinicalNote(BaseModel):
     id: int
     patient_id: int
     note: str
@@ -47,7 +47,7 @@ class PatientModel(BaseModel):
     Demography: Demography
     prescriptions: List[Prescription]
     lab_reports: List[LabReport]
-    clinical_notes: List[CinicalNotes]
+    clinical_notes: List[ClinicalNote]
 
 
 class RiskFactor(BaseModel):
@@ -61,3 +61,5 @@ class EmailCheckup(BaseModel):
     patient_id: int
     frequency: str
     job: Job
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)

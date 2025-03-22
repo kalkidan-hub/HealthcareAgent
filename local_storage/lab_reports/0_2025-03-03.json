@@ -1,0 +1,11 @@
+{
+    "id": 0,
+    "patient_id": 0,
+    "name": "blood test",
+    "type": "string",
+    "report_date": "2025-03-03",
+    "result_value": 5,
+    "unit": "string",
+    "normal_range": "string",
+    "status": "string"
+}

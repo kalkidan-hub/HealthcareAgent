@@ -17,6 +17,6 @@ def add_prescription(prescription: Prescription):
 
 @router.get("/get-prescription")
 def get_prescription(patient_id: str):
-    filename = f"prescriptions/{patient_id}.json"
-    prescription = Prescription.from_json(filename)
+    filename = f"local_storage/prescriptions/{patient_id}.json"
+    prescription = Prescription.parse_file(filename)
     return prescription
