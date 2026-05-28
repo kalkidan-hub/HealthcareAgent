@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import List, Optional
@@ -15,7 +15,7 @@ class Demography(BaseModel):
     email: EmailStr
 
 class Prescription(BaseModel):
-    id: int
+    id: Optional[int] = None
     patient_id: UUID
     type: str
     description: str
@@ -23,24 +23,26 @@ class Prescription(BaseModel):
     start_date: date
     end_date: Optional[date]
     calendar_path: str
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class LabReport(BaseModel):
-    id: int
+    id: Optional[int] = None
     patient_id: UUID
     name: str
     type: str
-    report_date: str
+    report_date: Optional[datetime] = None
     result_value: float
     unit: str
     normal_range: str
     status: str
 
 class ClinicalNote(BaseModel):
-    id: int
+    id: Optional[int] = None
     patient_id: UUID
     note: str
+    created_at: Optional[datetime] = None
 
 class PatientModel(BaseModel):
     id: UUID
