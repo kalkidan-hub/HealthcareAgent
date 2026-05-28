@@ -1,11 +1,16 @@
 from contextlib import contextmanager
 import json
+import hashlib
+import secrets
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
-from sqlalchemy import JSON, Column, Date, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Session
 
 from backend.infrastructure import database as db
+from backend.models.auth import UserRole
 from backend.models.patient import ClinicalNote as ClinicalNoteModel
 from backend.models.patient import LabReport as LabReportModel
 from backend.models.patient import Prescription as PrescriptionModel
@@ -15,9 +20,13 @@ class PatientRecord(db.Base):
     __tablename__ = "patients"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), unique=True, index=True, nullable=False, default=lambda: str(uuid.uuid4()))
+    role = Column(String(20), nullable=False, default=UserRole.patient.value)
     name = Column(String(255), nullable=False, default="")
     age = Column(Integer, nullable=False, default=0)
     email = Column(String(255), nullable=False, default="")
+    password_hash = Column(String(128), nullable=False, default="")
+    password_salt = Column(String(64), nullable=False, default="")
     risk_factors = Column(JSON, nullable=False, default=list)
 
 
@@ -25,7 +34,7 @@ class PrescriptionRecord(db.Base):
     __tablename__ = "prescriptions"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), unique=True, index=True, nullable=False)
+    patient_id = Column(String(36), unique=True, index=True, nullable=False)
     type = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     frequency = Column(String(50), nullable=False)
@@ -38,7 +47,7 @@ class ClinicalNoteRecord(db.Base):
     __tablename__ = "clinical_notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), unique=True, index=True, nullable=False)
+    patient_id = Column(String(36), unique=True, index=True, nullable=False)
     note = Column(Text, nullable=False)
 
 
@@ -46,7 +55,7 @@ class LabReportRecord(db.Base):
     __tablename__ = "lab_reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id"), index=True, nullable=False)
+    patient_id = Column(String(36), index=True, nullable=False)
     name = Column(String(255), nullable=False)
     type = Column(String(255), nullable=False)
     report_date = Column(String(50), nullable=False)
@@ -56,8 +65,29 @@ class LabReportRecord(db.Base):
     status = Column(String(50), nullable=False)
 
 
-def _normalize_patient_id(patient_id: Any) -> int:
-    return int(patient_id)
+class AuthTokenRecord(db.Base):
+    __tablename__ = "auth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    patient_id = Column(String(36), index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 120000).hex()
+
+
+def _verify_password(password: str, salt: str, password_hash: str) -> bool:
+    return secrets.compare_digest(_hash_password(password, salt), password_hash)
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _normalize_patient_id(patient_id: Any) -> str:
+    return str(uuid.UUID(str(patient_id)))
 
 
 @contextmanager
@@ -73,10 +103,10 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-def _get_or_create_patient(session: Session, patient_id: int) -> PatientRecord:
-    patient = session.get(PatientRecord, patient_id)
+def _get_or_create_patient(session: Session, patient_id: str) -> PatientRecord:
+    patient = session.query(PatientRecord).filter_by(user_id=patient_id).one_or_none()
     if patient is None:
-        patient = PatientRecord(id=patient_id, name="", age=0, email="", risk_factors=[])
+        patient = PatientRecord(user_id=patient_id, role=UserRole.patient.value, name="", age=0, email="", risk_factors=[])
         session.add(patient)
         session.flush()
     return patient
@@ -86,7 +116,8 @@ def _patient_to_dict(patient: Optional[PatientRecord]) -> Optional[dict]:
     if patient is None:
         return None
     return {
-        "id": patient.id,
+        "id": patient.user_id,
+        "role": patient.role,
         "name": patient.name,
         "age": patient.age,
         "email": patient.email,
@@ -94,11 +125,95 @@ def _patient_to_dict(patient: Optional[PatientRecord]) -> Optional[dict]:
     }
 
 
-def get_patient_record(patient_id: int) -> Optional[dict]:
+def get_patient_record(patient_id: Any) -> Optional[dict]:
     with session_scope() as session:
-        patient = session.get(PatientRecord, _normalize_patient_id(patient_id))
-        print(patient)
+        patient = session.query(PatientRecord).filter_by(user_id=_normalize_patient_id(patient_id)).one_or_none()
         return _patient_to_dict(patient)
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    with session_scope() as session:
+        patient = session.query(PatientRecord).filter_by(email=email.lower()).one_or_none()
+        return _patient_to_dict(patient)
+
+
+def create_user_account(
+    *,
+    name: str,
+    email: str,
+    password: str,
+    role: UserRole,
+    age: Optional[int] = None,
+    risk_factors: Optional[list[str]] = None,
+) -> dict:
+    with session_scope() as session:
+        normalized_email = email.lower().strip()
+        existing = session.query(PatientRecord).filter_by(email=normalized_email).one_or_none()
+        if existing is not None and existing.password_hash:
+            raise ValueError("A user with this email already exists")
+
+        if existing is None:
+            user = PatientRecord(
+                user_id=str(uuid.uuid4()),
+                role=role.value,
+                name=name,
+                age=age or 0,
+                email=normalized_email,
+                password_salt=secrets.token_hex(16),
+                password_hash="",
+                risk_factors=list(risk_factors or []),
+            )
+            session.add(user)
+        else:
+            user = existing
+            user.role = role.value
+            user.name = name
+            user.age = age or user.age
+            user.email = normalized_email
+            user.risk_factors = list(risk_factors or user.risk_factors or [])
+            user.password_salt = secrets.token_hex(16)
+
+        user.password_hash = _hash_password(password, user.password_salt)
+        session.flush()
+        return _patient_to_dict(user) or {}
+
+
+def authenticate_user(email: str, password: str) -> Optional[dict]:
+    with session_scope() as session:
+        user = session.query(PatientRecord).filter_by(email=email.lower()).one_or_none()
+        if user is None or not user.password_hash or not user.password_salt:
+            return None
+        if not _verify_password(password, user.password_salt, user.password_hash):
+            return None
+        return _patient_to_dict(user)
+
+
+def create_access_token(user_id: Any, expires_minutes: int = 24 * 60) -> str:
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    with session_scope() as session:
+        session.add(
+            AuthTokenRecord(
+                token_hash=_hash_token(token),
+                patient_id=_normalize_patient_id(user_id),
+                expires_at=expires_at,
+            )
+        )
+    return token
+
+
+def get_user_by_access_token(token: str) -> Optional[dict]:
+    token_hash = _hash_token(token)
+    now = datetime.now(timezone.utc)
+    with session_scope() as session:
+        token_record = session.query(AuthTokenRecord).filter_by(token_hash=token_hash).one_or_none()
+        if token_record is None:
+            return None
+        if token_record.expires_at <= now:
+            session.delete(token_record)
+            return None
+        user = session.query(PatientRecord).filter_by(user_id=token_record.patient_id).one_or_none()
+        return _patient_to_dict(user)
 
 
 def upsert_patient_profile(

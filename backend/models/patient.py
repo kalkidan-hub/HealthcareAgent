@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr
 from typing import List, Optional
 
@@ -8,14 +9,14 @@ from schedule import Job
 
 class Demography(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     name: str
     age: int
     email: EmailStr
 
 class Prescription(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     type: str
     description: str
     frequency: str
@@ -27,7 +28,7 @@ class Prescription(BaseModel):
 
 class LabReport(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     name: str
     type: str
     report_date: str
@@ -38,11 +39,11 @@ class LabReport(BaseModel):
 
 class ClinicalNote(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     note: str
 
 class PatientModel(BaseModel):
-    id: int
+    id: UUID
     Demography: Demography
     prescriptions: List[Prescription]
     lab_reports: List[LabReport]
@@ -51,13 +52,13 @@ class PatientModel(BaseModel):
 
 class RiskFactor(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     risk_factor: str
     description: str
 
 class EmailCheckup(BaseModel):
     id: int
-    patient_id: int
+    patient_id: UUID
     frequency: str
     job: Job
 

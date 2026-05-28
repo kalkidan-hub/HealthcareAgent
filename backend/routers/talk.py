@@ -1,12 +1,12 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.infrastructure.auth import get_current_user
 from backend.models.talk import TalkRequest, TalkResponse
 
 router = APIRouter()
 
 @router.post("/talk", response_model=TalkResponse)
-async def talk(request: TalkRequest):
+async def talk(request: TalkRequest, current_user=Depends(get_current_user)):
     if not request.message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
     
