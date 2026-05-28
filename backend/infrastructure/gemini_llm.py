@@ -1,21 +1,28 @@
-from dotenv import load_dotenv
+from __future__ import annotations
+
 import os
 
-# Load environment variables from .env file
+from dotenv import load_dotenv
+
 load_dotenv()
 
-# Now you can access the environment variable
-google_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+from google import genai
+
+_GEMINI_CLIENT = None
 
 
-import google.generativeai as genai
+def _configure_client() -> None:
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is not None:
+        return
 
-genai.configure(api_key=google_credentials)  # Gemini uses API Key, not GCP key
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set. Add it to .env or export it before starting the app.")
 
-models = genai.list_models()
-# for model in models:
-#     print(model.name)
-def ask_gemini(prompt):
-    model = genai.GenerativeModel("gemini-1.5-flash-latest")
-    response = model.generate_content(prompt)
-    return response
+    _GEMINI_CLIENT = genai.Client(api_key=api_key)
+
+
+def ask_gemini(prompt: str, *, model_name: str = "gemini-2.5-flash"):
+    _configure_client()
+    return _GEMINI_CLIENT.models.generate_content(model=model_name, contents=prompt)

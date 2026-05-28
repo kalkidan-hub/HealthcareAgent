@@ -52,4 +52,4 @@ The main endpoints are mounted under `/api`:
 - `GET /api/get-clinical-note?patient_id=<uuid>`
 - `POST /api/add-lab-report`
 - `GET /api/get-lab-report?patient_id=<uuid>&report_date=...`
-- `POST /api/talk`
+- `POST /api/talk` with patient-side conversation memory

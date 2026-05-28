@@ -50,3 +50,8 @@ def ensure_patient_access(current_user: CurrentUser, patient_id: UUID) -> None:
 def ensure_doctor_access(current_user: CurrentUser) -> None:
     if current_user.role != UserRole.doctor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Doctor access required")
+
+
+def ensure_patient_role(current_user: CurrentUser) -> None:
+    if current_user.role != UserRole.patient:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Patient access required")

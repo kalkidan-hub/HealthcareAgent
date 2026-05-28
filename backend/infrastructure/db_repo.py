@@ -74,6 +74,25 @@ class AuthTokenRecord(db.Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class ConversationMessageRecord(db.Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(String(36), index=True, nullable=False)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class ConversationSummaryRecord(db.Base):
+    __tablename__ = "conversation_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(String(36), unique=True, index=True, nullable=False)
+    summary = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 120000).hex()
 
@@ -285,6 +304,209 @@ def get_email(patient_id: int) -> str:
     if patient:
         return patient.get("email", "")
     return ""
+
+
+def get_prescription_history(patient_id: Any) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(PrescriptionRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(PrescriptionRecord.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": record.id,
+                "patient_id": record.patient_id,
+                "type": record.type,
+                "description": record.description,
+                "frequency": record.frequency,
+                "start_date": record.start_date,
+                "end_date": record.end_date,
+                "calendar_path": record.calendar_path,
+            }
+            for record in records
+        ]
+
+
+def get_clinical_note_history(patient_id: Any) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(ClinicalNoteRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(ClinicalNoteRecord.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": record.id,
+                "patient_id": record.patient_id,
+                "note": record.note,
+            }
+            for record in records
+        ]
+
+
+def get_lab_report_history(patient_id: Any) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(LabReportRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(LabReportRecord.report_date.desc(), LabReportRecord.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": record.id,
+                "patient_id": record.patient_id,
+                "name": record.name,
+                "type": record.type,
+                "report_date": record.report_date,
+                "result_value": record.result_value,
+                "unit": record.unit,
+                "normal_range": record.normal_range,
+                "status": record.status,
+            }
+            for record in records
+        ]
+
+
+def get_patient_chat_context(patient_id: Any) -> dict:
+    patient = get_patient_record(patient_id) or {}
+    return {
+        "patient": patient,
+        "prescriptions": get_prescription_history(patient_id),
+        "clinical_notes": get_clinical_note_history(patient_id),
+        "lab_reports": get_lab_report_history(patient_id),
+    }
+
+
+def get_recent_conversation_messages(patient_id: Any, *, limit: int = 12) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(ConversationMessageRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(ConversationMessageRecord.created_at.desc(), ConversationMessageRecord.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "role": record.role,
+                "content": record.content,
+                "created_at": record.created_at,
+            }
+            for record in reversed(records)
+        ]
+
+
+def get_all_conversation_messages(patient_id: Any) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(ConversationMessageRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(ConversationMessageRecord.created_at.asc(), ConversationMessageRecord.id.asc())
+            .all()
+        )
+        return [
+            {
+                "role": record.role,
+                "content": record.content,
+                "created_at": record.created_at,
+            }
+            for record in records
+        ]
+
+
+def append_conversation_message(patient_id: Any, role: str, content: str) -> None:
+    message = (content or "").strip()
+    if not message:
+        return
+
+    with session_scope() as session:
+        session.add(
+            ConversationMessageRecord(
+                patient_id=_normalize_patient_id(patient_id),
+                role=role,
+                content=message,
+            )
+        )
+
+
+def get_conversation_summary(patient_id: Any) -> str:
+    with session_scope() as session:
+        record = session.query(ConversationSummaryRecord).filter_by(patient_id=_normalize_patient_id(patient_id)).one_or_none()
+        if record is None:
+            return ""
+        return record.summary or ""
+
+
+def set_conversation_summary(patient_id: Any, summary: str) -> str:
+    normalized_patient_id = _normalize_patient_id(patient_id)
+    cleaned_summary = (summary or "").strip()
+
+    with session_scope() as session:
+        record = session.query(ConversationSummaryRecord).filter_by(patient_id=normalized_patient_id).one_or_none()
+        if record is None:
+            record = ConversationSummaryRecord(patient_id=normalized_patient_id, summary=cleaned_summary)
+            session.add(record)
+        else:
+            record.summary = cleaned_summary
+            record.updated_at = datetime.now(timezone.utc)
+        return cleaned_summary
+
+
+def get_recent_conversation_messages(patient_id: Any, *, limit: int = 8) -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(ConversationMessageRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .order_by(ConversationMessageRecord.created_at.desc(), ConversationMessageRecord.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "role": record.role,
+                "content": record.content,
+                "created_at": record.created_at,
+            }
+            for record in reversed(records)
+        ]
+
+
+def get_message_count(patient_id: Any) -> int:
+    with session_scope() as session:
+        return (
+            session.query(ConversationMessageRecord)
+            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .count()
+        )
+
+
+def prune_conversation_messages(patient_id: Any, *, keep_last: int = 8) -> None:
+    normalized_patient_id = _normalize_patient_id(patient_id)
+    with session_scope() as session:
+        records = (
+            session.query(ConversationMessageRecord)
+            .filter_by(patient_id=normalized_patient_id)
+            .order_by(ConversationMessageRecord.created_at.desc(), ConversationMessageRecord.id.desc())
+            .all()
+        )
+        for record in records[keep_last:]:
+            session.delete(record)
+
+
+def summarize_conversation_anchor(patient_id: Any) -> str:
+    patient_context = get_patient_chat_context(patient_id)
+    summary = get_conversation_summary(patient_id)
+    recent_messages = get_recent_conversation_messages(patient_id, limit=8)
+
+    return (
+        f"Protected anchor summary:\n{summary}\n\n"
+        f"Patient context:\n{json.dumps(patient_context, default=str, indent=2)}\n\n"
+        f"Recent conversation:\n{json.dumps(recent_messages, default=str, indent=2)}"
+    ).strip()
 
 
 def upsert_prescription(prescription: PrescriptionModel) -> dict:

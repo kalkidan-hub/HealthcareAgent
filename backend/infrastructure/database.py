@@ -48,6 +48,8 @@ def init_db() -> None:
     # Import model classes so SQLAlchemy knows about mapped classes.
     from backend.infrastructure.db_repo import (
         AuthTokenRecord,
+        ConversationMessageRecord,
+        ConversationSummaryRecord,
         PatientRecord,
         PrescriptionRecord,
         ClinicalNoteRecord,
@@ -55,7 +57,15 @@ def init_db() -> None:
     )  # noqa: F401
 
     # Reference imported classes to avoid linting 'unused import' warnings.
-    _MODEL_CLASSES = (AuthTokenRecord, PatientRecord, PrescriptionRecord, ClinicalNoteRecord, LabReportRecord)
+    _MODEL_CLASSES = (
+        AuthTokenRecord,
+        ConversationMessageRecord,
+        ConversationSummaryRecord,
+        PatientRecord,
+        PrescriptionRecord,
+        ClinicalNoteRecord,
+        LabReportRecord,
+    )
 
     Base.metadata.create_all(bind=engine)
 
@@ -101,6 +111,8 @@ def _migrate_uuid_user_ids() -> None:
             "clinical_notes": ["patient_id"],
             "lab_reports": ["patient_id"],
             "auth_tokens": ["patient_id"],
+            "conversation_messages": ["patient_id"],
+            "conversation_summaries": ["patient_id"],
         }
 
         for table_name, columns in table_updates.items():
