@@ -1,25 +1,38 @@
-import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
+
+from backend.infrastructure.db_repo import get_lab_report as db_get_lab_report
+from backend.infrastructure.db_repo import delete_lab_report as db_delete_lab_report
+from backend.infrastructure.db_repo import update_lab_report as db_update_lab_report
+from backend.infrastructure.db_repo import upsert_lab_report
 from backend.models.patient import LabReport
-from backend.infrastructure.local_storage import save_to_local_storage
 
 router = APIRouter()
 
 @router.post("/add-lab-report")
 def add_lab_report(lab_report: LabReport):
-    # Save lab report to local storage
-    filename = f"lab_reports/{lab_report.patient_id}_{lab_report.report_date}.json"
-    save_to_local_storage(filename, lab_report.model_dump_json())
+    return upsert_lab_report(lab_report)
 
-@router.get("get_lab_report")
-def get_lab_report(patient_id: str, report_date: str):
-    filename = f"local_storage/lab_reports/{patient_id}_{report_date}.json"
-    try:
-        with open(filename, 'r') as file:
-            lab_report_data = json.load(file)
-        lab_report = LabReport.parse_obj(lab_report_data)
-        return lab_report
-    except FileNotFoundError:
+
+@router.put("/update-lab-report/{patient_id}/{report_date}")
+def update_lab_report(patient_id: int, report_date: str, lab_report: LabReport):
+    if lab_report.patient_id != patient_id or lab_report.report_date != report_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="patient_id or report_date mismatch")
+    data = db_update_lab_report(lab_report)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab report not found")
+    return data
+
+
+@router.delete("/delete-lab-report/{patient_id}/{report_date}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lab_report(patient_id: int, report_date: str):
+    deleted = db_delete_lab_report(patient_id, report_date)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab report not found")
+    return None
+
+@router.get("/get-lab-report")
+def get_lab_report(patient_id: int, report_date: str):
+    data = db_get_lab_report(patient_id, report_date)
+    if not data:
         raise HTTPException(status_code=404, detail="Lab report not found")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Error decoding JSON")
+    return LabReport.model_validate(data)

@@ -3,8 +3,14 @@ from backend.routers.clinical_notes import router as clinical_notes
 from backend.routers.lab_report import router as lab_report
 from backend.routers.prescription import router as prescription_router
 from backend.routers.talk import router as talk_router
+from backend.infrastructure.database import init_db
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
 
 # Include the prescription router
 app.include_router(prescription_router, prefix="/api")

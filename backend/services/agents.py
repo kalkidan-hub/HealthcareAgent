@@ -1,5 +1,5 @@
 from backend.infrastructure.gemini_llm import ask_gemini
-from backend.infrastructure.local_storage import get_patient_name, get_patient_risk_factors, get_prescription, save_to_local_storage
+from backend.infrastructure.local_storage import get_patient_name, get_patient_risk_factors, get_prescription, update_patient_risk_factors
 from backend.models.patient import Prescription, RiskFactor
 
 
@@ -13,9 +13,8 @@ class RiskFactorExtractorAgent:
         prompt = ...
 
         risk_factors = ask_gemini(prompt)
-        
-        filename = f"risk_factor/{self.patient_id}.json"
-        save_to_local_storage(filename, risk_factors.model_dump_json())
+        risk_factors_text = getattr(risk_factors, "text", str(risk_factors)).strip()
+        update_patient_risk_factors(self.patient_id, risk_factors_text)
 
 class EmailCreatorAgent:
     def __init__(self, patient_id: int):

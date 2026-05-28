@@ -23,8 +23,7 @@ class Prescription(BaseModel):
     end_date: Optional[date]
     calendar_path: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class LabReport(BaseModel):
     id: int
