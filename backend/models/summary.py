@@ -15,3 +15,8 @@ class SummarizeResponse(BaseModel):
 class RecommendResponse(BaseModel):
     patient_id: UUID
     recommendations: str
+
+
+class RemindResponse(BaseModel):
+    patient_id: UUID
+    reminder: str

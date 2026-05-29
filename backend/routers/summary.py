@@ -6,9 +6,11 @@ from starlette.concurrency import run_in_threadpool
 from backend.infrastructure.auth import ensure_doctor_access, ensure_patient_role, get_current_user
 from backend.infrastructure.db_repo import get_patient_history
 from backend.infrastructure.db_repo import get_patient_record
+from backend.infrastructure.db_repo import get_prescription
 from backend.infrastructure.db_repo import get_vitals_history
 from backend.infrastructure.gemini_llm import ask_gemini
 from backend.models.summary import RecommendResponse, SummarizeRequest, SummarizeResponse
+from backend.models.summary import RemindResponse
 
 
 router = APIRouter()
@@ -114,3 +116,52 @@ Return the recommendations in 3 to 6 short bullet points.
         raise HTTPException(status_code=502, detail="Gemini returned an empty response")
 
     return RecommendResponse(patient_id=current_user.id, recommendations=recommendations_text)
+
+
+@router.get("/remind", response_model=RemindResponse)
+async def remind(current_user=Depends(get_current_user)):
+    ensure_patient_role(current_user)
+
+    patient = get_patient_record(current_user.id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    prescription = get_prescription(current_user.id)
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    patient_blob = json.dumps(patient, default=str, indent=2)
+    prescription_blob = json.dumps(prescription, default=str, indent=2)
+
+    prompt = f"""
+You are a patient-facing medication reminder assistant.
+
+Using the patient's profile and their current prescription below, write a brief, natural-language reminder.
+
+Requirements:
+- Keep it realistic, friendly, and concise.
+- State what the patient should take or do, how often, and until when if an end date is present.
+- If the prescription is a daily pill, say to take it once a day until the interval ends.
+- If an end date is not present, say to keep taking it as prescribed until the doctor says otherwise.
+- Do not invent medication names, doses, or instructions that are not present.
+- Mention any important caution or follow-up only if it is supported by the prescription data.
+
+Patient profile:
+{patient_blob}
+
+Current prescription:
+{prescription_blob}
+
+Write a single short reminder paragraph.
+""".strip()
+
+    try:
+        response = await run_in_threadpool(ask_gemini, prompt)
+        reminder_text = getattr(response, "text", str(response)).strip()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}") from exc
+
+    if not reminder_text:
+        raise HTTPException(status_code=502, detail="Gemini returned an empty response")
+
+    return RemindResponse(patient_id=current_user.id, reminder=reminder_text)
