@@ -3,10 +3,11 @@ import json
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
 from sqlalchemy import JSON, Column, Date, DateTime, Float, Integer, String, Text, cast
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import Session
 
 from backend.infrastructure import database as db
@@ -14,6 +15,7 @@ from backend.models.auth import UserRole
 from backend.models.patient import ClinicalNote as ClinicalNoteModel
 from backend.models.patient import LabReport as LabReportModel
 from backend.models.patient import Prescription as PrescriptionModel
+from backend.models.patient import Vitals as VitalsModel
 
 
 class PatientRecord(db.Base):
@@ -25,6 +27,9 @@ class PatientRecord(db.Base):
     name = Column(String(255), nullable=False, default="")
     age = Column(Integer, nullable=False, default=0)
     email = Column(String(255), nullable=False, default="")
+    sex = Column(String(50), nullable=True)
+    contact_number = Column(String(50), nullable=True)
+    emergency_number = Column(String(50), nullable=True)
     password_hash = Column(String(128), nullable=False, default="")
     password_salt = Column(String(64), nullable=False, default="")
     risk_factors = Column(JSON, nullable=False, default=list)
@@ -66,6 +71,24 @@ class LabReportRecord(db.Base):
     unit = Column(String(50), nullable=False)
     normal_range = Column(String(255), nullable=False)
     status = Column(String(50), nullable=False)
+
+
+class VitalsRecord(db.Base):
+    __tablename__ = "vitals"
+    __table_args__ = (UniqueConstraint("patient_id", "recorded_at", name="uq_vitals_patient_recorded_at"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(String(36), index=True, nullable=False)
+    recorded_at = Column(String(50), nullable=False)
+    systolic_bp = Column(Integer, nullable=True)
+    diastolic_bp = Column(Integer, nullable=True)
+    heart_rate = Column(Integer, nullable=True)
+    respiratory_rate = Column(Integer, nullable=True)
+    temperature_c = Column(Float, nullable=True)
+    spo2 = Column(Integer, nullable=True)
+    weight_kg = Column(Float, nullable=True)
+    height_cm = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
 
 
 class AuthTokenRecord(db.Base):
@@ -136,6 +159,22 @@ def _patient_id_matches(column, patient_id: Any):
     return cast(column, String) == _normalize_patient_id(patient_id)
 
 
+def _normalize_datetime_string(value: Any) -> str:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text_value = str(value).strip()
+        if not text_value:
+            return text_value
+        try:
+            parsed = datetime.fromisoformat(text_value)
+        except ValueError:
+            return text_value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
     session = db.SessionLocal()
@@ -168,6 +207,9 @@ def _patient_to_dict(patient: Optional[PatientRecord]) -> Optional[dict]:
         "name": patient.name,
         "age": patient.age,
         "email": patient.email,
+        "sex": patient.sex,
+        "contact_number": patient.contact_number,
+        "emergency_number": patient.emergency_number,
         "risk_factors": list(patient.risk_factors or []),
     }
 
@@ -192,6 +234,9 @@ def create_user_account(
     password: str,
     role: UserRole,
     age: Optional[int] = None,
+    sex: Optional[str] = None,
+    contact_number: Optional[str] = None,
+    emergency_number: Optional[str] = None,
     risk_factors: Optional[list[str]] = None,
 ) -> dict:
     with session_scope() as session:
@@ -207,6 +252,9 @@ def create_user_account(
                 name=name,
                 age=age or 0,
                 email=normalized_email,
+                sex=sex,
+                contact_number=contact_number,
+                emergency_number=emergency_number,
                 password_salt=secrets.token_hex(16),
                 password_hash="",
                 risk_factors=list(risk_factors or []),
@@ -218,6 +266,9 @@ def create_user_account(
             user.name = name
             user.age = age or user.age
             user.email = normalized_email
+            user.sex = sex if sex is not None else user.sex
+            user.contact_number = contact_number if contact_number is not None else user.contact_number
+            user.emergency_number = emergency_number if emergency_number is not None else user.emergency_number
             user.risk_factors = list(risk_factors or user.risk_factors or [])
             user.password_salt = secrets.token_hex(16)
 
@@ -271,6 +322,9 @@ def upsert_patient_profile(
     name: Optional[str] = None,
     age: Optional[int] = None,
     email: Optional[str] = None,
+    sex: Optional[str] = None,
+    contact_number: Optional[str] = None,
+    emergency_number: Optional[str] = None,
     risk_factors: Optional[list[str]] = None,
 ) -> dict:
     with session_scope() as session:
@@ -280,7 +334,17 @@ def upsert_patient_profile(
         if age is not None:
             patient.age = age
         if email is not None:
-            patient.email = email
+            normalized_email = email.lower().strip()
+            existing = session.query(PatientRecord).filter_by(email=normalized_email).one_or_none()
+            if existing is not None and existing.user_id != patient.user_id:
+                raise ValueError("A user with this email already exists")
+            patient.email = normalized_email
+        if sex is not None:
+            patient.sex = sex
+        if contact_number is not None:
+            patient.contact_number = contact_number
+        if emergency_number is not None:
+            patient.emergency_number = emergency_number
         if risk_factors is not None:
             patient.risk_factors = list(risk_factors)
         return _patient_to_dict(patient) or {}
@@ -404,6 +468,107 @@ def get_lab_report_history(patient_id: Any) -> list[dict]:
             }
             for record in records
         ]
+
+
+def _coerce_timeline_timestamp(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
+    if isinstance(value, str):
+        text_value = value.strip()
+        if not text_value:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            parsed = datetime.fromisoformat(text_value)
+        except ValueError:
+            try:
+                parsed_date = date.fromisoformat(text_value)
+                return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+            except ValueError:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def get_patient_history(patient_id: Any) -> list[dict]:
+    with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+
+        timeline: list[dict] = []
+
+        prescriptions = (
+            session.query(PrescriptionRecord)
+            .filter(_patient_id_matches(PrescriptionRecord.patient_id, resolved_patient_id))
+            .all()
+        )
+        for record in prescriptions:
+            timeline.append(
+                {
+                    "event_type": "prescription",
+                    "occurred_at": record.created_at,
+                    "payload": {
+                        "id": record.prescription_id,
+                        "patient_id": record.patient_id,
+                        "type": record.type,
+                        "description": record.description,
+                        "frequency": record.frequency,
+                        "start_date": record.start_date,
+                        "end_date": record.end_date,
+                        "calendar_path": record.calendar_path,
+                        "created_at": record.created_at,
+                    },
+                }
+            )
+
+        clinical_notes = (
+            session.query(ClinicalNoteRecord)
+            .filter(_patient_id_matches(ClinicalNoteRecord.patient_id, resolved_patient_id))
+            .all()
+        )
+        for record in clinical_notes:
+            timeline.append(
+                {
+                    "event_type": "clinical_note",
+                    "occurred_at": record.created_at,
+                    "payload": {
+                        "id": record.id,
+                        "patient_id": record.patient_id,
+                        "note": record.note,
+                        "created_at": record.created_at,
+                    },
+                }
+            )
+
+        lab_reports = (
+            session.query(LabReportRecord)
+            .filter(_patient_id_matches(LabReportRecord.patient_id, resolved_patient_id))
+            .all()
+        )
+        for record in lab_reports:
+            occurred_at = _coerce_timeline_timestamp(record.report_date)
+            timeline.append(
+                {
+                    "event_type": "lab_report",
+                    "occurred_at": occurred_at,
+                    "payload": {
+                        "id": record.id,
+                        "patient_id": record.patient_id,
+                        "name": record.name,
+                        "type": record.type,
+                        "report_date": record.report_date,
+                        "result_value": record.result_value,
+                        "unit": record.unit,
+                        "normal_range": record.normal_range,
+                        "status": record.status,
+                    },
+                }
+            )
+
+        timeline.sort(key=lambda item: (item["occurred_at"], item["event_type"]))
+        return timeline
 
 
 def get_patient_chat_context(patient_id: Any) -> dict:
@@ -789,3 +954,140 @@ def get_lab_report(patient_id: int, report_date: str) -> dict:
             "normal_range": record.normal_range,
             "status": record.status,
         }
+
+
+def upsert_vitals(vitals: VitalsModel) -> dict:
+    with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, vitals.patient_id)
+        _get_or_create_patient(session, patient_id)
+        recorded_at = _normalize_datetime_string(vitals.recorded_at)
+        record = (
+            session.query(VitalsRecord)
+            .filter(_patient_id_matches(VitalsRecord.patient_id, patient_id), VitalsRecord.recorded_at == recorded_at)
+            .one_or_none()
+        )
+        if record is None:
+            record = VitalsRecord(patient_id=patient_id, recorded_at=recorded_at)
+            session.add(record)
+        if vitals.id is not None:
+            record.id = vitals.id
+        record.systolic_bp = vitals.systolic_bp
+        record.diastolic_bp = vitals.diastolic_bp
+        record.heart_rate = vitals.heart_rate
+        record.respiratory_rate = vitals.respiratory_rate
+        record.temperature_c = vitals.temperature_c
+        record.spo2 = vitals.spo2
+        record.weight_kg = vitals.weight_kg
+        record.height_cm = vitals.height_cm
+        record.notes = vitals.notes
+        session.flush()
+        return {
+            "id": record.id,
+            "patient_id": record.patient_id,
+            "recorded_at": record.recorded_at,
+            "systolic_bp": record.systolic_bp,
+            "diastolic_bp": record.diastolic_bp,
+            "heart_rate": record.heart_rate,
+            "respiratory_rate": record.respiratory_rate,
+            "temperature_c": record.temperature_c,
+            "spo2": record.spo2,
+            "weight_kg": record.weight_kg,
+            "height_cm": record.height_cm,
+            "notes": record.notes,
+        }
+
+
+def update_vitals(vitals: VitalsModel) -> Optional[dict]:
+    with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, vitals.patient_id)
+        recorded_at = _normalize_datetime_string(vitals.recorded_at)
+        record = (
+            session.query(VitalsRecord)
+            .filter(_patient_id_matches(VitalsRecord.patient_id, patient_id), VitalsRecord.recorded_at == recorded_at)
+            .one_or_none()
+        )
+        if record is None:
+            return None
+        _get_or_create_patient(session, patient_id)
+        if vitals.id is not None:
+            record.id = vitals.id
+        record.systolic_bp = vitals.systolic_bp
+        record.diastolic_bp = vitals.diastolic_bp
+        record.heart_rate = vitals.heart_rate
+        record.respiratory_rate = vitals.respiratory_rate
+        record.temperature_c = vitals.temperature_c
+        record.spo2 = vitals.spo2
+        record.weight_kg = vitals.weight_kg
+        record.height_cm = vitals.height_cm
+        record.notes = vitals.notes
+        return vitals.model_dump()
+
+
+def delete_vitals(patient_id: int, recorded_at: str) -> bool:
+    with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        normalized_recorded_at = _normalize_datetime_string(recorded_at)
+        record = (
+            session.query(VitalsRecord)
+            .filter(_patient_id_matches(VitalsRecord.patient_id, resolved_patient_id), VitalsRecord.recorded_at == normalized_recorded_at)
+            .one_or_none()
+        )
+        if record is None:
+            return False
+        session.delete(record)
+        return True
+
+
+def get_vitals(patient_id: int, recorded_at: str) -> dict:
+    with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        normalized_recorded_at = _normalize_datetime_string(recorded_at)
+        record = (
+            session.query(VitalsRecord)
+            .filter(_patient_id_matches(VitalsRecord.patient_id, resolved_patient_id), VitalsRecord.recorded_at == normalized_recorded_at)
+            .one_or_none()
+        )
+        if record is None:
+            return {}
+        return {
+            "id": record.id,
+            "patient_id": record.patient_id,
+            "recorded_at": record.recorded_at,
+            "systolic_bp": record.systolic_bp,
+            "diastolic_bp": record.diastolic_bp,
+            "heart_rate": record.heart_rate,
+            "respiratory_rate": record.respiratory_rate,
+            "temperature_c": record.temperature_c,
+            "spo2": record.spo2,
+            "weight_kg": record.weight_kg,
+            "height_cm": record.height_cm,
+            "notes": record.notes,
+        }
+
+
+def get_vitals_history(patient_id: int) -> list[dict]:
+    with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        records = (
+            session.query(VitalsRecord)
+            .filter(_patient_id_matches(VitalsRecord.patient_id, resolved_patient_id))
+            .order_by(VitalsRecord.recorded_at.desc(), VitalsRecord.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": record.id,
+                "patient_id": record.patient_id,
+                "recorded_at": record.recorded_at,
+                "systolic_bp": record.systolic_bp,
+                "diastolic_bp": record.diastolic_bp,
+                "heart_rate": record.heart_rate,
+                "respiratory_rate": record.respiratory_rate,
+                "temperature_c": record.temperature_c,
+                "spo2": record.spo2,
+                "weight_kg": record.weight_kg,
+                "height_cm": record.height_cm,
+                "notes": record.notes,
+            }
+            for record in records
+        ]

@@ -39,6 +39,9 @@ The API exposes two user roles: `patient` and `doctor`.
 - `POST /api/auth/register` creates a user and returns a bearer token.
 - `POST /api/auth/login` returns a bearer token for an existing user.
 - `GET /api/auth/me` returns the authenticated user profile.
+- `PUT /api/auth/me` updates the authenticated user profile.
+
+Registration accepts optional profile fields for `sex`, `contact_number`, and `emergency_number`.
 
 Send the token in the `Authorization: Bearer <token>` header for protected routes.
 
@@ -52,4 +55,9 @@ The main endpoints are mounted under `/api`:
 - `GET /api/get-clinical-note?patient_id=<uuid>`
 - `POST /api/add-lab-report`
 - `GET /api/get-lab-report?patient_id=<uuid>&report_date=...`
+- `POST /api/add-vitals`
+- `GET /api/get-vitals?patient_id=<uuid>&recorded_at=...`
+- `GET /api/get-vitals-history?patient_id=<uuid>`
+- `PUT /api/update-vitals/{patient_id}/{recorded_at}`
+- `DELETE /api/delete-vitals/{patient_id}/{recorded_at}`
 - `POST /api/talk` with patient-side conversation memory

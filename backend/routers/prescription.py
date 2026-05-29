@@ -14,7 +14,6 @@ router = APIRouter()
 
 @router.post("/add-prescription")
 def add_prescription(prescription: Prescription, current_user=Depends(get_current_user)):
-    print(prescription)
     ensure_doctor_access(current_user)
     return upsert_prescription(prescription)
 

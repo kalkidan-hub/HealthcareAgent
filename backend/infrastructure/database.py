@@ -54,6 +54,7 @@ def init_db() -> None:
         PrescriptionRecord,
         ClinicalNoteRecord,
         LabReportRecord,
+        VitalsRecord,
     )  # noqa: F401
 
     # Reference imported classes to avoid linting 'unused import' warnings.
@@ -65,6 +66,7 @@ def init_db() -> None:
         PrescriptionRecord,
         ClinicalNoteRecord,
         LabReportRecord,
+        VitalsRecord,
     )
 
     Base.metadata.create_all(bind=engine)
@@ -105,6 +107,13 @@ def _migrate_uuid_user_ids() -> None:
             connection.execute(text("ALTER TABLE patients ADD COLUMN password_salt VARCHAR(64)"))
             connection.execute(text("UPDATE patients SET password_salt = '' WHERE password_salt IS NULL"))
             connection.execute(text("ALTER TABLE patients ALTER COLUMN password_salt SET NOT NULL"))
+
+        if "sex" not in patient_columns:
+            connection.execute(text("ALTER TABLE patients ADD COLUMN sex VARCHAR(50)"))
+        if "contact_number" not in patient_columns:
+            connection.execute(text("ALTER TABLE patients ADD COLUMN contact_number VARCHAR(50)"))
+        if "emergency_number" not in patient_columns:
+            connection.execute(text("ALTER TABLE patients ADD COLUMN emergency_number VARCHAR(50)"))
 
         if "prescriptions" in inspector.get_table_names():
             prescription_columns = {column["name"] for column in inspector.get_columns("prescriptions")}

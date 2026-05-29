@@ -44,6 +44,23 @@ class ClinicalNote(BaseModel):
     note: str
     created_at: Optional[datetime] = None
 
+
+class Vitals(BaseModel):
+    id: Optional[int] = None
+    patient_id: UUID
+    recorded_at: datetime
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    heart_rate: Optional[int] = None
+    respiratory_rate: Optional[int] = None
+    temperature_c: Optional[float] = None
+    spo2: Optional[int] = None
+    weight_kg: Optional[float] = None
+    height_cm: Optional[float] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
 class PatientModel(BaseModel):
     id: UUID
     Demography: Demography

@@ -1,8 +1,23 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.infrastructure.auth import get_current_user
-from backend.infrastructure.db_repo import authenticate_user, create_access_token, create_user_account
-from backend.models.auth import AuthResponse, CurrentUser, LoginRequest, RegisterRequest
+from backend.infrastructure.auth import ensure_doctor_access, get_current_user
+from backend.infrastructure.db_repo import (
+    authenticate_user,
+    create_access_token,
+    create_user_account,
+    get_patient_history,
+    upsert_patient_profile,
+)
+from backend.models.auth import (
+    AuthResponse,
+    CurrentUser,
+    LoginRequest,
+    PatientHistoryResponse,
+    RegisterRequest,
+    UpdateProfileRequest,
+)
 
 
 router = APIRouter()
@@ -17,6 +32,9 @@ def register(request: RegisterRequest):
             password=request.password,
             role=request.role,
             age=request.age,
+            sex=request.sex,
+            contact_number=request.contact_number,
+            emergency_number=request.emergency_number,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -38,3 +56,34 @@ def login(request: LoginRequest):
 @router.get("/auth/me", response_model=CurrentUser)
 def me(current_user: CurrentUser = Depends(get_current_user)):
     return current_user
+
+
+@router.put("/auth/me", response_model=CurrentUser)
+def update_me(request: UpdateProfileRequest, current_user: CurrentUser = Depends(get_current_user)):
+    try:
+        updated_user = upsert_patient_profile(
+            current_user.id,
+            name=request.name,
+            email=request.email,
+            age=request.age,
+            sex=request.sex,
+            contact_number=request.contact_number,
+            emergency_number=request.emergency_number,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return CurrentUser.model_validate(updated_user)
+
+
+@router.get("/patient_history", response_model=PatientHistoryResponse)
+def patient_history(current_user: CurrentUser = Depends(get_current_user)):
+    history = get_patient_history(current_user.id)
+    return PatientHistoryResponse(items=history)
+
+
+@router.get("/patient_history/{patient_id}", response_model=PatientHistoryResponse)
+def patient_history_for_doctor(patient_id: UUID, current_user: CurrentUser = Depends(get_current_user)):
+    ensure_doctor_access(current_user)
+    history = get_patient_history(patient_id)
+    return PatientHistoryResponse(items=history)
