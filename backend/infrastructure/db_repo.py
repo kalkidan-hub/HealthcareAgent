@@ -221,6 +221,17 @@ def get_patient_record(patient_id: Any) -> Optional[dict]:
         return _patient_to_dict(patient)
 
 
+def get_all_patient_records() -> list[dict]:
+    with session_scope() as session:
+        records = (
+            session.query(PatientRecord)
+            .filter(PatientRecord.role == UserRole.patient.value)
+            .order_by(PatientRecord.name.asc(), PatientRecord.id.asc())
+            .all()
+        )
+        return [_patient_to_dict(record) or {} for record in records]
+
+
 def get_user_by_email(email: str) -> Optional[dict]:
     with session_scope() as session:
         patient = session.query(PatientRecord).filter_by(email=email.lower()).one_or_none()

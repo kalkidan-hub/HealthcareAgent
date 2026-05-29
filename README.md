@@ -49,6 +49,7 @@ Send the token in the `Authorization: Bearer <token>` header for protected route
 
 The main endpoints are mounted under `/api`:
 
+- `GET /api/patients` doctor-only patient list with profile, chief complaint, alerts, and last update
 - `POST /api/add-prescription`
 - `GET /api/get-prescription?patient_id=<uuid>`
 - `POST /api/add-clinical-note`

@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from backend.routers.auth import router as auth_router
 from backend.routers.clinical_notes import router as clinical_notes
 from backend.routers.lab_report import router as lab_report
+from backend.routers.patients import router as patients_router
 from backend.routers.prescription import router as prescription_router
 from backend.routers.summary import router as summary_router
 from backend.routers.vitals import router as vitals_router
@@ -17,6 +18,7 @@ def on_startup():
 
 # Include the prescription router
 app.include_router(auth_router, prefix="/api")
+app.include_router(patients_router, prefix="/api")
 app.include_router(prescription_router, prefix="/api")
 app.include_router(lab_report, prefix="/api")
 app.include_router(summary_router, prefix="/api")
