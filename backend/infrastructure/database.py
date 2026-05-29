@@ -106,6 +106,24 @@ def _migrate_uuid_user_ids() -> None:
             connection.execute(text("UPDATE patients SET password_salt = '' WHERE password_salt IS NULL"))
             connection.execute(text("ALTER TABLE patients ALTER COLUMN password_salt SET NOT NULL"))
 
+        if "prescriptions" in inspector.get_table_names():
+            prescription_columns = {column["name"] for column in inspector.get_columns("prescriptions")}
+            if "created_at" not in prescription_columns:
+                connection.execute(text("ALTER TABLE prescriptions ADD COLUMN created_at TIMESTAMPTZ"))
+                connection.execute(
+                    text("UPDATE prescriptions SET created_at = NOW() WHERE created_at IS NULL")
+                )
+                connection.execute(text("ALTER TABLE prescriptions ALTER COLUMN created_at SET NOT NULL"))
+
+        if "clinical_notes" in inspector.get_table_names():
+            clinical_note_columns = {column["name"] for column in inspector.get_columns("clinical_notes")}
+            if "created_at" not in clinical_note_columns:
+                connection.execute(text("ALTER TABLE clinical_notes ADD COLUMN created_at TIMESTAMPTZ"))
+                connection.execute(
+                    text("UPDATE clinical_notes SET created_at = NOW() WHERE created_at IS NULL")
+                )
+                connection.execute(text("ALTER TABLE clinical_notes ALTER COLUMN created_at SET NOT NULL"))
+
         table_updates = {
             "prescriptions": ["patient_id"],
             "clinical_notes": ["patient_id"],
@@ -119,6 +137,16 @@ def _migrate_uuid_user_ids() -> None:
             if table_name not in inspector.get_table_names():
                 continue
             table_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            if table_name == "prescriptions" and "prescription_id" not in table_columns:
+                connection.execute(text("ALTER TABLE prescriptions ADD COLUMN prescription_id VARCHAR(36)"))
+                rows = connection.execute(text("SELECT id FROM prescriptions WHERE prescription_id IS NULL OR prescription_id = ''")).fetchall()
+                for row in rows:
+                    connection.execute(
+                        text("UPDATE prescriptions SET prescription_id = :prescription_id WHERE id = :id"),
+                        {"prescription_id": str(uuid.uuid4()), "id": row.id},
+                    )
+                connection.execute(text("ALTER TABLE prescriptions ALTER COLUMN prescription_id SET NOT NULL"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_prescriptions_prescription_id ON prescriptions (prescription_id)"))
             if "patient_uuid" not in table_columns and "patient_id" in table_columns:
                 connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN patient_uuid VARCHAR(36)"))
                 connection.execute(

@@ -15,7 +15,7 @@ class Demography(BaseModel):
     email: EmailStr
 
 class Prescription(BaseModel):
-    id: Optional[int] = None
+    id: Optional[UUID] = None
     patient_id: UUID
     type: str
     description: str

@@ -34,6 +34,7 @@ class PrescriptionRecord(db.Base):
     __tablename__ = "prescriptions"
 
     id = Column(Integer, primary_key=True, index=True)
+    prescription_id = Column(String(36), unique=True, index=True, nullable=False, default=lambda: str(uuid.uuid4()))
     patient_id = Column(String(36), unique=True, index=True, nullable=False)
     type = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
@@ -108,7 +109,27 @@ def _hash_token(token: str) -> str:
 
 
 def _normalize_patient_id(patient_id: Any) -> str:
-    return str(uuid.UUID(str(patient_id)))
+    try:
+        return str(uuid.UUID(str(patient_id)))
+    except (TypeError, ValueError):
+        return str(patient_id)
+
+
+def _resolve_patient_user_id(session: Session, patient_id: Any) -> str:
+    normalized = _normalize_patient_id(patient_id)
+    try:
+        uuid.UUID(normalized)
+        return normalized
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(patient_id, int) or (isinstance(patient_id, str) and patient_id.isdigit()):
+        legacy_id = int(patient_id)
+        legacy_patient = session.query(PatientRecord).filter(PatientRecord.id == legacy_id).one_or_none()
+        if legacy_patient is not None:
+            return legacy_patient.user_id
+
+    return normalized
 
 
 def _patient_id_matches(column, patient_id: Any):
@@ -129,9 +150,10 @@ def session_scope() -> Iterator[Session]:
 
 
 def _get_or_create_patient(session: Session, patient_id: str) -> PatientRecord:
-    patient = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, patient_id)).one_or_none()
+    resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+    patient = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, resolved_patient_id)).one_or_none()
     if patient is None:
-        patient = PatientRecord(user_id=patient_id, role=UserRole.patient.value, name="", age=0, email="", risk_factors=[])
+        patient = PatientRecord(user_id=resolved_patient_id, role=UserRole.patient.value, name="", age=0, email="", risk_factors=[])
         session.add(patient)
         session.flush()
     return patient
@@ -152,7 +174,8 @@ def _patient_to_dict(patient: Optional[PatientRecord]) -> Optional[dict]:
 
 def get_patient_record(patient_id: Any) -> Optional[dict]:
     with session_scope() as session:
-        patient = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        patient = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, resolved_patient_id)).one_or_none()
         return _patient_to_dict(patient)
 
 
@@ -220,7 +243,7 @@ def create_access_token(user_id: Any, expires_minutes: int = 24 * 60) -> str:
         session.add(
             AuthTokenRecord(
                 token_hash=_hash_token(token),
-                patient_id=_normalize_patient_id(user_id),
+                patient_id=_resolve_patient_user_id(session, user_id),
                 expires_at=expires_at,
             )
         )
@@ -237,7 +260,8 @@ def get_user_by_access_token(token: str) -> Optional[dict]:
         if token_record.expires_at <= now:
             session.delete(token_record)
             return None
-        user = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, token_record.patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, token_record.patient_id)
+        user = session.query(PatientRecord).filter(_patient_id_matches(PatientRecord.user_id, resolved_patient_id)).one_or_none()
         return _patient_to_dict(user)
 
 
@@ -250,7 +274,7 @@ def upsert_patient_profile(
     risk_factors: Optional[list[str]] = None,
 ) -> dict:
     with session_scope() as session:
-        patient = _get_or_create_patient(session, _normalize_patient_id(patient_id))
+        patient = _get_or_create_patient(session, patient_id)
         if name is not None:
             patient.name = name
         if age is not None:
@@ -286,7 +310,7 @@ def _normalize_risk_factors(value: Any) -> list[str]:
 def update_patient_risk_factors(patient_id: int, risk_factors: Any):
     normalized = _normalize_risk_factors(risk_factors)
     with session_scope() as session:
-        patient = _get_or_create_patient(session, _normalize_patient_id(patient_id))
+        patient = _get_or_create_patient(session, patient_id)
         patient.risk_factors = normalized
         return normalized
 
@@ -314,15 +338,16 @@ def get_email(patient_id: int) -> str:
 
 def get_prescription_history(patient_id: Any) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(PrescriptionRecord)
-            .filter(_patient_id_matches(PrescriptionRecord.patient_id, patient_id))
-            .order_by(PrescriptionRecord.id.desc())
+            .filter(_patient_id_matches(PrescriptionRecord.patient_id, resolved_patient_id))
+            .order_by(PrescriptionRecord.created_at.desc(), PrescriptionRecord.id.desc())
             .all()
         )
         return [
             {
-                "id": record.id,
+                "id": record.prescription_id,
                 "patient_id": record.patient_id,
                 "type": record.type,
                 "description": record.description,
@@ -338,9 +363,10 @@ def get_prescription_history(patient_id: Any) -> list[dict]:
 
 def get_clinical_note_history(patient_id: Any) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(ClinicalNoteRecord)
-            .filter(_patient_id_matches(ClinicalNoteRecord.patient_id, patient_id))
+            .filter(_patient_id_matches(ClinicalNoteRecord.patient_id, resolved_patient_id))
             .order_by(ClinicalNoteRecord.id.desc())
             .all()
         )
@@ -357,9 +383,10 @@ def get_clinical_note_history(patient_id: Any) -> list[dict]:
 
 def get_lab_report_history(patient_id: Any) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(LabReportRecord)
-            .filter(_patient_id_matches(LabReportRecord.patient_id, patient_id))
+            .filter(_patient_id_matches(LabReportRecord.patient_id, resolved_patient_id))
             .order_by(LabReportRecord.report_date.desc(), LabReportRecord.id.desc())
             .all()
         )
@@ -391,9 +418,10 @@ def get_patient_chat_context(patient_id: Any) -> dict:
 
 def get_recent_conversation_messages(patient_id: Any, *, limit: int = 12) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(ConversationMessageRecord)
-            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, patient_id))
+            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, resolved_patient_id))
             .order_by(ConversationMessageRecord.created_at.desc(), ConversationMessageRecord.id.desc())
             .limit(limit)
             .all()
@@ -410,9 +438,10 @@ def get_recent_conversation_messages(patient_id: Any, *, limit: int = 12) -> lis
 
 def get_all_conversation_messages(patient_id: Any) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(ConversationMessageRecord)
-            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, patient_id))
+            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, resolved_patient_id))
             .order_by(ConversationMessageRecord.created_at.asc(), ConversationMessageRecord.id.asc())
             .all()
         )
@@ -434,7 +463,7 @@ def append_conversation_message(patient_id: Any, role: str, content: str) -> Non
     with session_scope() as session:
         session.add(
             ConversationMessageRecord(
-                patient_id=_normalize_patient_id(patient_id),
+                patient_id=_resolve_patient_user_id(session, patient_id),
                 role=role,
                 content=message,
             )
@@ -443,20 +472,21 @@ def append_conversation_message(patient_id: Any, role: str, content: str) -> Non
 
 def get_conversation_summary(patient_id: Any) -> str:
     with session_scope() as session:
-        record = session.query(ConversationSummaryRecord).filter(_patient_id_matches(ConversationSummaryRecord.patient_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(ConversationSummaryRecord).filter(_patient_id_matches(ConversationSummaryRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
             return ""
         return record.summary or ""
 
 
 def set_conversation_summary(patient_id: Any, summary: str) -> str:
-    normalized_patient_id = _normalize_patient_id(patient_id)
     cleaned_summary = (summary or "").strip()
 
     with session_scope() as session:
-        record = session.query(ConversationSummaryRecord).filter(_patient_id_matches(ConversationSummaryRecord.patient_id, normalized_patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(ConversationSummaryRecord).filter(_patient_id_matches(ConversationSummaryRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
-            record = ConversationSummaryRecord(patient_id=normalized_patient_id, summary=cleaned_summary)
+            record = ConversationSummaryRecord(patient_id=resolved_patient_id, summary=cleaned_summary)
             session.add(record)
         else:
             record.summary = cleaned_summary
@@ -466,9 +496,10 @@ def set_conversation_summary(patient_id: Any, summary: str) -> str:
 
 def get_recent_conversation_messages(patient_id: Any, *, limit: int = 8) -> list[dict]:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(ConversationMessageRecord)
-            .filter_by(patient_id=_normalize_patient_id(patient_id))
+            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, resolved_patient_id))
             .order_by(ConversationMessageRecord.created_at.desc(), ConversationMessageRecord.id.desc())
             .limit(limit)
             .all()
@@ -485,16 +516,17 @@ def get_recent_conversation_messages(patient_id: Any, *, limit: int = 8) -> list
 
 def get_message_count(patient_id: Any) -> int:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         return (
             session.query(ConversationMessageRecord)
-            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, patient_id))
+            .filter(_patient_id_matches(ConversationMessageRecord.patient_id, resolved_patient_id))
             .count()
         )
 
 
 def prune_conversation_messages(patient_id: Any, *, keep_last: int = 8) -> None:
-    normalized_patient_id = _normalize_patient_id(patient_id)
     with session_scope() as session:
+        normalized_patient_id = _resolve_patient_user_id(session, patient_id)
         records = (
             session.query(ConversationMessageRecord)
             .filter(_patient_id_matches(ConversationMessageRecord.patient_id, normalized_patient_id))
@@ -518,15 +550,13 @@ def summarize_conversation_anchor(patient_id: Any) -> str:
 
 
 def upsert_prescription(prescription: PrescriptionModel) -> dict:
-    patient_id = _normalize_patient_id(prescription.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, prescription.patient_id)
         _get_or_create_patient(session, patient_id)
         record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, patient_id)).one_or_none()
         if record is None:
             record = PrescriptionRecord(patient_id=patient_id)
             session.add(record)
-        if prescription.id is not None:
-            record.id = prescription.id
         record.type = prescription.type
         record.description = prescription.description
         record.frequency = prescription.frequency
@@ -535,7 +565,7 @@ def upsert_prescription(prescription: PrescriptionModel) -> dict:
         record.calendar_path = prescription.calendar_path
         session.flush()
         return {
-            "id": record.id,
+            "id": record.prescription_id,
             "patient_id": record.patient_id,
             "type": record.type,
             "description": record.description,
@@ -548,26 +578,35 @@ def upsert_prescription(prescription: PrescriptionModel) -> dict:
 
 
 def update_prescription(prescription: PrescriptionModel) -> Optional[dict]:
-    patient_id = _normalize_patient_id(prescription.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, prescription.patient_id)
         record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, patient_id)).one_or_none()
         if record is None:
             return None
         _get_or_create_patient(session, patient_id)
-        if prescription.id is not None:
-            record.id = prescription.id
         record.type = prescription.type
         record.description = prescription.description
         record.frequency = prescription.frequency
         record.start_date = prescription.start_date
         record.end_date = prescription.end_date
         record.calendar_path = prescription.calendar_path
-        return prescription.model_dump()
+        return {
+            "id": record.prescription_id,
+            "patient_id": record.patient_id,
+            "type": record.type,
+            "description": record.description,
+            "frequency": record.frequency,
+            "start_date": record.start_date,
+            "end_date": record.end_date,
+            "calendar_path": record.calendar_path,
+            "created_at": record.created_at,
+        }
 
 
 def delete_prescription(patient_id: int) -> bool:
     with session_scope() as session:
-        record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
             return False
         session.delete(record)
@@ -576,11 +615,12 @@ def delete_prescription(patient_id: int) -> bool:
 
 def get_prescription(patient_id: int) -> dict:
     with session_scope() as session:
-        record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(PrescriptionRecord).filter(_patient_id_matches(PrescriptionRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
             return {}
         return {
-            "id": record.id,
+            "id": record.prescription_id,
             "patient_id": record.patient_id,
             "type": record.type,
             "description": record.description,
@@ -593,8 +633,8 @@ def get_prescription(patient_id: int) -> dict:
 
 
 def upsert_clinical_note(clinical_note: ClinicalNoteModel) -> dict:
-    patient_id = _normalize_patient_id(clinical_note.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, clinical_note.patient_id)
         _get_or_create_patient(session, patient_id)
         record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, patient_id)).one_or_none()
         if record is None:
@@ -613,8 +653,8 @@ def upsert_clinical_note(clinical_note: ClinicalNoteModel) -> dict:
 
 
 def update_clinical_note(clinical_note: ClinicalNoteModel) -> Optional[dict]:
-    patient_id = _normalize_patient_id(clinical_note.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, clinical_note.patient_id)
         record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, patient_id)).one_or_none()
         if record is None:
             return None
@@ -627,7 +667,8 @@ def update_clinical_note(clinical_note: ClinicalNoteModel) -> Optional[dict]:
 
 def delete_clinical_note(patient_id: int) -> bool:
     with session_scope() as session:
-        record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
             return False
         session.delete(record)
@@ -636,7 +677,8 @@ def delete_clinical_note(patient_id: int) -> bool:
 
 def get_clinical_note(patient_id: int) -> dict:
     with session_scope() as session:
-        record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, patient_id)).one_or_none()
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
+        record = session.query(ClinicalNoteRecord).filter(_patient_id_matches(ClinicalNoteRecord.patient_id, resolved_patient_id)).one_or_none()
         if record is None:
             return {}
         return {
@@ -648,8 +690,8 @@ def get_clinical_note(patient_id: int) -> dict:
 
 
 def upsert_lab_report(lab_report: LabReportModel) -> dict:
-    patient_id = _normalize_patient_id(lab_report.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, lab_report.patient_id)
         _get_or_create_patient(session, patient_id)
         # ensure report_date is filled; accept datetime or string from the model
         report_dt = getattr(lab_report, "report_date", None)
@@ -691,8 +733,8 @@ def upsert_lab_report(lab_report: LabReportModel) -> dict:
 
 
 def update_lab_report(lab_report: LabReportModel) -> Optional[dict]:
-    patient_id = _normalize_patient_id(lab_report.patient_id)
     with session_scope() as session:
+        patient_id = _resolve_patient_user_id(session, lab_report.patient_id)
         record = (
             session.query(LabReportRecord)
             .filter(_patient_id_matches(LabReportRecord.patient_id, patient_id), LabReportRecord.report_date == lab_report.report_date)
@@ -714,9 +756,10 @@ def update_lab_report(lab_report: LabReportModel) -> Optional[dict]:
 
 def delete_lab_report(patient_id: int, report_date: str) -> bool:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         record = (
             session.query(LabReportRecord)
-            .filter(_patient_id_matches(LabReportRecord.patient_id, patient_id), LabReportRecord.report_date == report_date)
+            .filter(_patient_id_matches(LabReportRecord.patient_id, resolved_patient_id), LabReportRecord.report_date == report_date)
             .one_or_none()
         )
         if record is None:
@@ -727,9 +770,10 @@ def delete_lab_report(patient_id: int, report_date: str) -> bool:
 
 def get_lab_report(patient_id: int, report_date: str) -> dict:
     with session_scope() as session:
+        resolved_patient_id = _resolve_patient_user_id(session, patient_id)
         record = (
             session.query(LabReportRecord)
-            .filter(_patient_id_matches(LabReportRecord.patient_id, patient_id), LabReportRecord.report_date == report_date)
+            .filter(_patient_id_matches(LabReportRecord.patient_id, resolved_patient_id), LabReportRecord.report_date == report_date)
             .one_or_none()
         )
         if record is None:
