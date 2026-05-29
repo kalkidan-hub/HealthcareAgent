@@ -5,14 +5,7 @@ from typing import List, Optional
 
 from schedule import Job
 
-# inspired by EHRS
-
-class Demography(BaseModel):
-    id: int
-    patient_id: UUID
-    name: str
-    age: int
-    email: EmailStr
+# inspired by EHRSystem's patient model
 
 class Prescription(BaseModel):
     id: Optional[UUID] = None
