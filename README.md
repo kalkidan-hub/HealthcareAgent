@@ -61,4 +61,5 @@ The main endpoints are mounted under `/api`:
 - `PUT /api/update-vitals/{patient_id}/{recorded_at}`
 - `DELETE /api/delete-vitals/{patient_id}/{recorded_at}`
 - `POST /api/summarize` with `{ "patient_id": "<uuid>" }`
+- `GET /api/recommend` for the logged-in patient
 - `POST /api/talk` with patient-side conversation memory

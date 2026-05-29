@@ -10,3 +10,8 @@ class SummarizeRequest(BaseModel):
 class SummarizeResponse(BaseModel):
     patient_id: UUID
     summary: str
+
+
+class RecommendResponse(BaseModel):
+    patient_id: UUID
+    recommendations: str
