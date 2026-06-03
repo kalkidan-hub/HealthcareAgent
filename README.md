@@ -1,4 +1,4 @@
-# HealthcareAgent
+# ThePulse
 
 FastAPI backend with PostgreSQL persistence for prescriptions, lab reports, clinical notes, and user metadata.
 Users authenticate with bearer tokens, and user-facing IDs are UUIDs instead of integers.
